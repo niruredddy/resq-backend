@@ -1,0 +1,1 @@
+# AI-Powered-Emergency-Response-Intelligence-Platform-For-Disaster-Manage-And-Relief-Opera-OCT-2026
