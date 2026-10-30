@@ -5,6 +5,8 @@ Creates grid cells over disaster-affected areas and computes impact scores.
 import math
 from sqlalchemy.orm import Session
 from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
+from shapely.geometry import box
 
 from app.config import settings
 from app.models.disaster_event import DisasterEvent
@@ -85,6 +87,7 @@ def compute_impact_score(
     infrastructure_score: float = 50,
     event_severity: str | None = None,
     impact_radius_km: float | None = None,
+    observed_extent_hit: bool | None = None,
 ) -> dict:
     """
     Compute a composite impact score (0-100) for a grid cell.
@@ -100,6 +103,10 @@ def compute_impact_score(
         effective_radius = 50
 
     distance_factor = max(0, 1 - (distance_from_center_km / effective_radius))
+    if observed_extent_hit is True:
+        distance_factor = max(distance_factor, 0.85)
+    elif observed_extent_hit is False:
+        distance_factor = 0
     distance_factor = distance_factor ** 0.8  # slightly less aggressive decay
 
     # Event severity is comparable across hazard types; raw magnitude is not.
@@ -118,7 +125,7 @@ def compute_impact_score(
     infra_vulnerability = 1 - (infrastructure_score / 100)
 
     # Weighted composite
-    score = (
+    score = 0 if observed_extent_hit is False else (
         distance_factor * 0.35 +
         risk_factor * 0.30 +
         pop_factor * 0.20 +
@@ -139,7 +146,7 @@ def compute_impact_score(
     else:
         severity = ZoneSeverity.LOW
 
-    structural_damage = round(distance_factor * risk_factor * 100, 1)
+    structural_damage = 0 if observed_extent_hit is False else round(distance_factor * risk_factor * 100, 1)
 
     return {
         "impact_score": score,
@@ -178,8 +185,16 @@ def build_impact_zones(
         max_lon=max(cell["max_lon"] for cell in cells),
     )
     osm_by_cell = count_osm_features_by_cell(cells, osm_result.get("features", []))
+    affected_area = getattr(event, "affected_area", None)
+    observed_extent = to_shape(affected_area) if affected_area is not None else None
 
-    # Delete old zones for this event
+    previous_profiles = {
+        zone.zone_code: (zone.properties or {}).get("vulnerability")
+        for zone in db.query(ImpactZone).filter(ImpactZone.event_id == event.id).all()
+        if (zone.properties or {}).get("vulnerability")
+    }
+
+    # Rebuild the grid while retaining coordinator-entered demographic profiles.
     db.query(ImpactZone).filter(ImpactZone.event_id == event.id).delete()
 
     zones = []
@@ -200,12 +215,19 @@ def build_impact_zones(
             if cell_population_density is not None:
                 cell_population_density = max(cell_population_density, 0)
 
+            satellite_extent_hit = (
+                observed_extent.intersects(
+                    box(cell["min_lon"], cell["min_lat"], cell["max_lon"], cell["max_lat"])
+                )
+                if observed_extent is not None else None
+            )
             scoring = compute_impact_score(
                 distance_from_center_km=distance_km,
                 magnitude=magnitude,
                 population_density=cell_population_density or 0,
                 event_severity=event.severity,
                 impact_radius_km=radius,
+                observed_extent_hit=satellite_extent_hit,
             )
 
             polygon_wkt = (
@@ -240,7 +262,11 @@ def build_impact_zones(
                 grid_row=cell["grid_row"],
                 grid_col=cell["grid_col"],
                 cell_size_km=actual_cell_size,
-                estimated_population=int((cell_population_density or 0) * (actual_cell_size ** 2)),
+                estimated_population=(
+                    0
+                    if satellite_extent_hit is False
+                    else int((cell_population_density or 0) * (actual_cell_size ** 2))
+                ),
                 buildings_affected=bldgs_affected,
                 properties={
                     "total_buildings": bldg_data["total_buildings"],
@@ -250,7 +276,10 @@ def build_impact_zones(
                     "population_source": population_source,
                     "osm_source": osm_result.get("source", "osm_unavailable"),
                     "score_model": "distance_severity_population_heuristic",
+                    "satellite_extent_source": "event_assessment" if observed_extent is not None else None,
+                    "satellite_extent_hit": satellite_extent_hit,
                     "distance_km": round(distance_km, 2),
+                    "vulnerability": previous_profiles.get(zone_code),
                 },
             )
             zones.append(zone)
@@ -259,3 +288,41 @@ def build_impact_zones(
     db.commit()
     logger.info(f"Created {len(zones)} impact zones for event {event.title}")
     return zones
+
+
+def apply_satellite_extent_to_zones(db: Session, event: DisasterEvent, extent) -> int:
+    """Re-score existing zones against a newly received satellite impact extent."""
+    zones = db.query(ImpactZone).filter(ImpactZone.event_id == event.id).all()
+    for zone in zones:
+        properties = dict(zone.properties or {})
+        geometry = to_shape(zone.cell_geometry)
+        extent_hit = geometry.intersects(extent)
+        scoring = compute_impact_score(
+            distance_from_center_km=float(properties.get("distance_km", 0) or 0),
+            magnitude=float(event.magnitude or 0),
+            population_density=float(zone.population_density or 0),
+            infrastructure_score=float(zone.infrastructure_score or 50),
+            event_severity=event.severity,
+            impact_radius_km=float(event.radius_km or 50),
+            observed_extent_hit=extent_hit,
+        )
+        zone.severity = scoring["severity"]
+        zone.impact_score = scoring["impact_score"]
+        zone.structural_damage_pct = scoring["structural_damage_pct"]
+        zone.accessibility_score = scoring["accessibility_score"]
+        zone.estimated_population = (
+            0
+            if not extent_hit
+            else int((zone.population_density or 0) * (zone.cell_size_km ** 2))
+        )
+        zone.buildings_affected = int(
+            (properties.get("total_buildings", 0) or 0)
+            * (scoring["structural_damage_pct"] / 100)
+        )
+        properties.update({
+            "satellite_extent_source": "event_assessment",
+            "satellite_extent_hit": extent_hit,
+            "score_model": "distance_severity_population_satellite_extent",
+        })
+        zone.properties = properties
+    return len(zones)

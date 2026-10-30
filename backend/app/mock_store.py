@@ -119,7 +119,7 @@ MOCK_DEPOTS = [
         "address": "NDRF 8th Battalion HQ, Ghaziabad / Delhi NCR",
         "region": "North India",
         "country": "India",
-        "status": "operational",
+        "status": "active",
         "capacity_tons": 500.0,
         "contact_phone": "+91-11-24363260",
         "contact_name": "Col. Rajesh Mehta",
@@ -134,7 +134,7 @@ MOCK_DEPOTS = [
         "address": "Harbour Coastal Response Depot",
         "region": "South India",
         "country": "India",
-        "status": "operational",
+        "status": "active",
         "capacity_tons": 750.0,
         "contact_phone": "+91-44-25361234",
         "contact_name": "Cmdr. V. Ramanathan",
@@ -149,7 +149,7 @@ MOCK_DEPOTS = [
         "address": "Brahmaputra Flood Management Compound",
         "region": "Northeast India",
         "country": "India",
-        "status": "operational",
+        "status": "active",
         "capacity_tons": 600.0,
         "contact_phone": "+91-361-2237000",
         "contact_name": "Dr. Hemanta Bora",
@@ -157,68 +157,82 @@ MOCK_DEPOTS = [
     },
 ]
 
+MOCK_ZONE_VULNERABILITIES = {}
+
 MOCK_ITEMS = [
     {
-        "id": "i1111111-1111-1111-1111-111111111111",
+        "id": "a1111111-1111-1111-1111-111111111111",
         "depot_id": "d1111111-1111-1111-1111-111111111111",
         "category": "food",
         "name": "High-Energy Ready-to-Eat Biscuits (BP-5)",
         "unit": "packets",
         "quantity_available": 14500,
         "quantity_reserved": 800,
+        "quantity_deployed": 0,
+        "is_perishable": True,
         "minimum_threshold": 2000,
         "last_restocked": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     },
     {
-        "id": "i2222222-2222-2222-2222-222222222222",
+        "id": "a2222222-2222-2222-2222-222222222222",
         "depot_id": "d1111111-1111-1111-1111-111111111111",
         "category": "water",
         "name": "Purified Potable Water (1L Bottles)",
         "unit": "liters",
         "quantity_available": 24000,
         "quantity_reserved": 1500,
+        "quantity_deployed": 0,
+        "is_perishable": True,
         "minimum_threshold": 5000,
         "last_restocked": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     },
     {
-        "id": "i3333333-3333-3333-3333-333333333333",
+        "id": "a3333333-3333-3333-3333-333333333333",
         "depot_id": "d1111111-1111-1111-1111-111111111111",
         "category": "medical",
         "name": "Emergency Trauma Medical Kits",
         "unit": "kits",
         "quantity_available": 450,
         "quantity_reserved": 40,
+        "quantity_deployed": 0,
+        "is_perishable": True,
         "minimum_threshold": 100,
         "last_restocked": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     },
     {
-        "id": "i4444444-4444-4444-4444-444444444444",
+        "id": "a4444444-4444-4444-4444-444444444444",
         "depot_id": "d2222222-2222-2222-2222-222222222222",
         "category": "vehicle",
         "name": "Inflatable Rescue Motor Boats (IRBs)",
         "unit": "boats",
         "quantity_available": 32,
         "quantity_reserved": 6,
+        "quantity_deployed": 0,
+        "is_perishable": False,
         "minimum_threshold": 10,
         "last_restocked": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     },
     {
-        "id": "i5555555-5555-5555-5555-555555555555",
+        "id": "a5555555-5555-5555-5555-555555555555",
         "depot_id": "d3333333-3333-3333-3333-333333333333",
         "category": "personnel",
         "name": "Certified NDRF Disaster First Responders",
         "unit": "personnel",
         "quantity_available": 180,
         "quantity_reserved": 25,
+        "quantity_deployed": 0,
+        "is_perishable": False,
         "minimum_threshold": 30,
         "last_restocked": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     },
 ]
+
+MOCK_DEMAND_OBSERVATIONS: list[dict] = []
 
 
 def generate_mock_zones_geojson(event_id_str: str, cell_size_km: float = 2.0, pop_density: float = 500) -> dict:
@@ -286,7 +300,12 @@ def generate_mock_zones_geojson(event_id_str: str, cell_size_km: float = 2.0, po
                     "coordinates": polygon,
                 },
                 "properties": {
-                    "id": str(uuid.uuid4()),
+                    "id": str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"resq:{event_id_str}:ZONE-R{r_idx}C{c_idx}",
+                        )
+                    ),
                     "zone_code": f"ZONE-R{r_idx}C{c_idx}",
                     "severity": sev,
                     "impact_score": score,

@@ -8,7 +8,14 @@ import {
   Package, WarningCircle, Plus, MagnifyingGlass,
   MapPin, Funnel,
 } from '@phosphor-icons/react';
-import { fetchDepots, fetchItems, fetchInventorySummary } from '../services/api';
+import {
+  createDepot,
+  createItem,
+  fetchDepots,
+  fetchHealth,
+  fetchItems,
+  updateItem,
+} from '../services/api';
 import { DEMO_DEPOTS, DEMO_ITEMS } from '../data/demoData';
 import 'leaflet/dist/leaflet.css';
 
@@ -46,24 +53,139 @@ export default function ResourceInventory() {
   const [searchText, setSearchText] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [showLowOnly, setShowLowOnly] = useState(false);
+  const [storageMode, setStorageMode] = useState('checking');
+  const [loadError, setLoadError] = useState('');
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [showDepotForm, setShowDepotForm] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [mutationError, setMutationError] = useState('');
+  const [mutationNotice, setMutationNotice] = useState('');
+  const [itemDraft, setItemDraft] = useState({
+    depot_id: '',
+    category: 'food',
+    name: '',
+    unit: 'packets',
+    quantity_available: 0,
+    quantity_reserved: 0,
+    minimum_threshold: 0,
+  });
+  const [depotDraft, setDepotDraft] = useState({
+    name: '',
+    code: '',
+    latitude: '',
+    longitude: '',
+    country: '',
+    region: '',
+  });
 
   useEffect(() => {
     loadData();
   }, []);
 
   async function loadData() {
-    try {
-      const [depotsData, itemsData] = await Promise.all([
-        fetchDepots().catch(() => DEMO_DEPOTS),
-        fetchItems().catch(() => DEMO_ITEMS),
-      ]);
-      setDepots(depotsData.length > 0 ? depotsData : DEMO_DEPOTS);
-      setItems(itemsData.length > 0 ? itemsData : DEMO_ITEMS);
-    } catch {
+    const [depotsResult, itemsResult, healthResult] = await Promise.allSettled([
+      fetchDepots(),
+      fetchItems(),
+      fetchHealth(),
+    ]);
+
+    const errors = [];
+    if (depotsResult.status === 'fulfilled') {
+      setDepots(depotsResult.value);
+    } else {
       setDepots(DEMO_DEPOTS);
+      errors.push('Could not load depots from the API.');
+    }
+    if (itemsResult.status === 'fulfilled') {
+      setItems(itemsResult.value);
+    } else {
       setItems(DEMO_ITEMS);
+      errors.push('Could not load stock items from the API.');
+    }
+    if (healthResult.status === 'fulfilled') {
+      const databaseMode = healthResult.value.database;
+      setStorageMode(databaseMode === 'connected' || databaseMode === 'mock_mode' ? databaseMode : 'unavailable');
+      if (databaseMode !== 'connected' && databaseMode !== 'mock_mode') {
+        errors.push('Storage mode is unknown; inventory edits are disabled.');
+      }
+    } else {
+      setStorageMode('unavailable');
+      errors.push('Storage status is unavailable; inventory edits are disabled.');
+    }
+    setLoadError(errors.join(' '));
+    setLoading(false);
+  }
+
+  async function handleCreateItem(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMutationError('');
+    setMutationNotice('');
+    try {
+      const depotId = itemDraft.depot_id || selectedDepot?.id || depots[0]?.id;
+      if (!depotId) throw new Error('Create or select a depot first.');
+      await createItem({
+        ...itemDraft,
+        depot_id: depotId,
+        quantity_available: Number(itemDraft.quantity_available),
+        quantity_reserved: Number(itemDraft.quantity_reserved),
+        minimum_threshold: Number(itemDraft.minimum_threshold),
+      });
+      setShowItemForm(false);
+      setItemDraft(current => ({ ...current, name: '' }));
+      await loadData();
+      setMutationNotice('Inventory item added.');
+    } catch (error) {
+      setMutationError(error.response?.data?.detail || error.message || 'Could not create inventory item.');
     } finally {
-      setLoading(false);
+      setSaving(false);
+    }
+  }
+
+  async function handleCreateDepot(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMutationError('');
+    setMutationNotice('');
+    try {
+      const depot = await createDepot({
+        ...depotDraft,
+        latitude: Number(depotDraft.latitude),
+        longitude: Number(depotDraft.longitude),
+      });
+      setShowDepotForm(false);
+      setSelectedDepot(depot);
+      setItemDraft(current => ({ ...current, depot_id: depot.id }));
+      setDepotDraft({ name: '', code: '', latitude: '', longitude: '', country: '', region: '' });
+      await loadData();
+      setMutationNotice(`Depot ${depot.code} created.`);
+    } catch (error) {
+      setMutationError(error.response?.data?.detail || 'Could not create depot.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateItem(event) {
+    event.preventDefault();
+    if (!editingItem) return;
+    setSaving(true);
+    setMutationError('');
+    setMutationNotice('');
+    try {
+      await updateItem(editingItem.id, {
+        quantity_available: Number(editingItem.quantity_available),
+        quantity_reserved: Number(editingItem.quantity_reserved),
+        quantity_deployed: Number(editingItem.quantity_deployed),
+      });
+      setEditingItem(null);
+      await loadData();
+      setMutationNotice('Stock quantities updated.');
+    } catch (error) {
+      setMutationError(error.response?.data?.detail || 'Could not update stock quantities.');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -99,6 +221,7 @@ export default function ResourceInventory() {
   }, [depotItems]);
 
   const categories = [...new Set(items.map(i => i.category))].sort();
+  const canEditInventory = storageMode === 'connected' || storageMode === 'mock_mode';
 
   if (loading) {
     return <div className="loading-spinner"><div className="spinner"></div></div>;
@@ -284,6 +407,74 @@ export default function ResourceInventory() {
           </button>
         </div>
 
+        <div className="inventory-actions">
+          <button
+            className="btn btn-sm btn-secondary"
+            disabled={!canEditInventory}
+            onClick={() => { setShowDepotForm(value => !value); setShowItemForm(false); }}
+          >
+            <Plus size={14} /> Add depot
+          </button>
+          <button
+            className="btn btn-sm btn-primary"
+            disabled={!canEditInventory || depots.length === 0}
+            onClick={() => { setShowItemForm(value => !value); setShowDepotForm(false); }}
+          >
+            <Plus size={14} /> Add stock item
+          </button>
+          {storageMode === 'mock_mode' && (
+            <span className="inventory-mode-note">Demo changes are temporary and reset when the backend restarts.</span>
+          )}
+          {storageMode === 'unavailable' && (
+            <span className="inventory-mode-note">Connect to the backend to manage inventory.</span>
+          )}
+        </div>
+        {loadError && <div className="demand-message is-error" role="alert">{loadError}</div>}
+        {mutationError && <div className="demand-message is-error" role="alert">{mutationError}</div>}
+        {mutationNotice && <div className="demand-message is-success" role="status">{mutationNotice}</div>}
+
+        {showDepotForm && (
+          <form className="card inventory-editor" onSubmit={handleCreateDepot}>
+            <div className="card-header"><h3>Register resource depot</h3></div>
+            <div className="inventory-form-grid">
+              <label>Depot name<input required value={depotDraft.name} onChange={e => setDepotDraft({ ...depotDraft, name: e.target.value })} /></label>
+              <label>Unique code<input required value={depotDraft.code} onChange={e => setDepotDraft({ ...depotDraft, code: e.target.value })} /></label>
+              <label>Latitude<input required type="number" min="-90" max="90" step="any" value={depotDraft.latitude} onChange={e => setDepotDraft({ ...depotDraft, latitude: e.target.value })} /></label>
+              <label>Longitude<input required type="number" min="-180" max="180" step="any" value={depotDraft.longitude} onChange={e => setDepotDraft({ ...depotDraft, longitude: e.target.value })} /></label>
+              <label>Region<input value={depotDraft.region} onChange={e => setDepotDraft({ ...depotDraft, region: e.target.value })} /></label>
+              <label>Country<input value={depotDraft.country} onChange={e => setDepotDraft({ ...depotDraft, country: e.target.value })} /></label>
+            </div>
+            <div className="inventory-editor-actions">
+              <button className="btn btn-sm btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save depot'}</button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowDepotForm(false)}>Cancel</button>
+            </div>
+          </form>
+        )}
+
+        {showItemForm && (
+          <form className="card inventory-editor" onSubmit={handleCreateItem}>
+            <div className="card-header"><h3>Add resource stock</h3></div>
+            <div className="inventory-form-grid">
+              <label>Depot<select required value={itemDraft.depot_id || selectedDepot?.id || depots[0]?.id || ''} onChange={e => setItemDraft({ ...itemDraft, depot_id: e.target.value })}>
+                {depots.map(depot => <option key={depot.id} value={depot.id}>{depot.name}</option>)}
+              </select></label>
+              <label>Category<select value={itemDraft.category} onChange={e => setItemDraft({ ...itemDraft, category: e.target.value })}>
+                {['food', 'water', 'medical', 'shelter', 'vehicle', 'personnel', 'equipment', 'fuel', 'clothing', 'communication']
+                  .map(category => <option key={category} value={category}>{category}</option>)}
+              </select></label>
+              <label>Item name<input required value={itemDraft.name} onChange={e => setItemDraft({ ...itemDraft, name: e.target.value })} /></label>
+              <label>Unit<input required value={itemDraft.unit} onChange={e => setItemDraft({ ...itemDraft, unit: e.target.value })} /></label>
+              <label>Available<input required type="number" min="0" value={itemDraft.quantity_available} onChange={e => setItemDraft({ ...itemDraft, quantity_available: e.target.value })} /></label>
+              <label>Reserved<input required type="number" min="0" value={itemDraft.quantity_reserved} onChange={e => setItemDraft({ ...itemDraft, quantity_reserved: e.target.value })} /></label>
+              <label>Low-stock threshold<input required type="number" min="0" value={itemDraft.minimum_threshold} onChange={e => setItemDraft({ ...itemDraft, minimum_threshold: e.target.value })} /></label>
+            </div>
+            <div className="inventory-editor-actions">
+              <button className="btn btn-sm btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save stock item'}</button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowItemForm(false)}>Cancel</button>
+            </div>
+          </form>
+        )}
+
         {/* Table */}
         <div className="card" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <div style={{ overflow: 'auto', flex: 1 }}>
@@ -297,6 +488,7 @@ export default function ResourceInventory() {
                   <th>Deployed</th>
                   <th>Threshold</th>
                   <th>Stock Level</th>
+                  <th>Manage</th>
                 </tr>
               </thead>
               <tbody>
@@ -333,6 +525,16 @@ export default function ResourceInventory() {
                           {Math.round(pct)}%
                         </div>
                       </td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          disabled={!canEditInventory}
+                          onClick={() => setEditingItem({ ...item })}
+                          aria-label={`Adjust ${item.name} stock`}
+                        >
+                          Adjust
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -346,6 +548,32 @@ export default function ResourceInventory() {
             )}
           </div>
         </div>
+        {editingItem && (
+          <div className="inventory-modal-backdrop">
+            <form className="card inventory-editor" onSubmit={handleUpdateItem}>
+              <div className="card-header"><h3>Adjust quantities — {editingItem.name}</h3></div>
+              <div className="inventory-form-grid">
+                {[
+                  ['quantity_available', 'Available'],
+                  ['quantity_reserved', 'Reserved'],
+                  ['quantity_deployed', 'Deployed'],
+                ].map(([key, label]) => (
+                  <label key={key}>{label}<input
+                    required
+                    type="number"
+                    min="0"
+                    value={editingItem[key] || 0}
+                    onChange={e => setEditingItem(current => ({ ...current, [key]: e.target.value }))}
+                  /></label>
+                ))}
+              </div>
+              <div className="inventory-editor-actions">
+                <button className="btn btn-sm btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save quantities'}</button>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditingItem(null)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );

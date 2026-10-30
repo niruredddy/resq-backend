@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Any, Optional
+from pydantic import BaseModel, Field, model_validator
+from typing import Any, Literal, Optional
 from datetime import datetime
 from uuid import UUID
 
@@ -41,8 +41,10 @@ class DisasterEventFilter(BaseModel):
 
 
 class IngestionRequest(BaseModel):
-    sources: list[str] = Field(default=["usgs", "gdacs"])
-    usgs_timeframe: str = Field(default="week")
+    sources: list[Literal["usgs", "gdacs", "ndma", "satellite"]] = Field(
+        default_factory=lambda: ["usgs", "gdacs"]
+    )
+    usgs_timeframe: Literal["hour", "day", "week", "month"] = "week"
 
 
 class IngestionResult(BaseModel):
@@ -85,17 +87,94 @@ class ZoneGenerationRequest(BaseModel):
     population_density: Optional[float] = Field(default=None, ge=0)
 
 
+class VulnerabilityProfileUpdate(BaseModel):
+    elderly_pct: float = Field(ge=0, le=100)
+    children_pct: float = Field(ge=0, le=100)
+    medically_dependent_pct: float = Field(ge=0, le=100)
+    source: str = Field(default="coordinator_report", min_length=1, max_length=128)
+
+
+class DemandObservationCreate(BaseModel):
+    event_id: UUID
+    zone_id: Optional[UUID] = None
+    zone_code: str = Field(min_length=1, max_length=64)
+    resource: Optional[Literal[
+        "food_packets",
+        "water_liters",
+        "medical_kits",
+        "shelter_capacity_people",
+    ]] = None
+    observed_demand: Optional[float] = Field(default=None, ge=0)
+    affected_population: Optional[int] = Field(default=None, ge=0)
+    source: str = Field(default="field_report", min_length=1, max_length=128)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_observation_value(self):
+        if self.observed_demand is None and self.affected_population is None:
+            raise ValueError("Provide observed_demand, affected_population, or both.")
+        if self.observed_demand is not None and self.resource is None:
+            raise ValueError("resource is required when observed_demand is provided.")
+        return self
+
+
+class DemandScenarioRequest(BaseModel):
+    event_id: UUID
+    response_time_hours: float = Field(default=24, ge=0, le=168)
+    resource_availability_factor: float = Field(default=1, ge=0, le=2)
+    planning_horizon_days: int = Field(default=3, ge=1, le=30)
+
+
+class SatelliteAssessmentRequest(BaseModel):
+    geojson: dict[str, Any]
+    assessment_source: str = Field(min_length=1, max_length=128)
+    assessed_at: Optional[datetime] = None
+
+
+class FieldOperationCreate(BaseModel):
+    operation_code: str = Field(min_length=1, max_length=64)
+    operation_type: Literal[
+        "search_rescue",
+        "evacuation",
+        "medical_aid",
+        "supply_distribution",
+        "damage_assessment",
+        "infrastructure_repair",
+        "communication_setup",
+    ]
+    title: str = Field(min_length=1, max_length=256)
+    event_id: Optional[UUID] = None
+    zone_id: Optional[UUID] = None
+    description: Optional[str] = None
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+    team_lead: Optional[str] = Field(default=None, max_length=128)
+    team_size: Optional[float] = Field(default=None, ge=0)
+    priority: float = Field(default=5, ge=1, le=10)
+    estimated_duration_hrs: Optional[float] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together.")
+        return self
+
+
+class FieldOperationStatusUpdate(BaseModel):
+    status: Literal["planned", "in_progress", "completed", "suspended", "cancelled"]
+
+
 # ─── Resource Inventory ─────────────────────────────────────────
 
 class ResourceDepotCreate(BaseModel):
     name: str
     code: str
-    latitude: float
-    longitude: float
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
     address: Optional[str] = None
     region: Optional[str] = None
     country: Optional[str] = None
-    capacity_tons: Optional[float] = None
+    capacity_tons: Optional[float] = Field(default=None, ge=0)
     contact_phone: Optional[str] = None
     contact_name: Optional[str] = None
 
@@ -121,22 +200,33 @@ class ResourceDepotOut(BaseModel):
 
 class ResourceItemCreate(BaseModel):
     depot_id: UUID
-    category: str
+    category: Literal[
+        "food",
+        "water",
+        "medical",
+        "shelter",
+        "vehicle",
+        "personnel",
+        "equipment",
+        "fuel",
+        "clothing",
+        "communication",
+    ]
     name: str
     unit: str
-    quantity_available: int = 0
-    quantity_reserved: int = 0
+    quantity_available: int = Field(default=0, ge=0)
+    quantity_reserved: int = Field(default=0, ge=0)
     expiry_date: Optional[datetime] = None
     is_perishable: bool = False
-    unit_weight_kg: Optional[float] = None
-    unit_cost_usd: Optional[float] = None
-    minimum_threshold: int = 0
+    unit_weight_kg: Optional[float] = Field(default=None, ge=0)
+    unit_cost_usd: Optional[float] = Field(default=None, ge=0)
+    minimum_threshold: int = Field(default=0, ge=0)
 
 
 class ResourceItemUpdate(BaseModel):
-    quantity_available: Optional[int] = None
-    quantity_reserved: Optional[int] = None
-    quantity_deployed: Optional[int] = None
+    quantity_available: Optional[int] = Field(default=None, ge=0)
+    quantity_reserved: Optional[int] = Field(default=None, ge=0)
+    quantity_deployed: Optional[int] = Field(default=None, ge=0)
 
 
 class ResourceItemOut(BaseModel):

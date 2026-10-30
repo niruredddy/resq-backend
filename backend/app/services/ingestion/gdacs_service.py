@@ -170,6 +170,7 @@ async def ingest_gdacs_data(db: Session) -> list[DisasterEvent]:
             event = upsert_disaster_event(db, event_data)
             results.append(event)
         except Exception as exc:
+            db.rollback()
             logger.error(f"Failed to ingest GDACS event: {exc}", exc_info=True)
 
     logger.info(f"Ingested {len(results)} GDACS events")

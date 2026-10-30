@@ -1,10 +1,12 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { lazy, Suspense, useLayoutEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
   HouseLine,
   MapTrifold,
   ListBullets,
   GridFour,
   Package,
+  ChartBar,
   Lightning,
   Moon,
   Sun,
@@ -12,12 +14,22 @@ import {
 import { useTheme } from './ThemeContext';
 import ScrollReveal from './ScrollReveal';
 
+const PAGE_COMPONENTS = {
+  '/': lazy(() => import('../pages/Dashboard')),
+  '/map': lazy(() => import('../pages/DisasterMap')),
+  '/events': lazy(() => import('../pages/EventsList')),
+  '/zones': lazy(() => import('../pages/ImpactZones')),
+  '/resources': lazy(() => import('../pages/ResourceInventory')),
+  '/demand': lazy(() => import('../pages/DemandPlanning')),
+};
+
 const NAV_ITEMS = [
   { path: '/', label: 'Overview', icon: HouseLine },
   { path: '/events', label: 'News', icon: ListBullets },
   { path: '/map', label: 'Map', icon: MapTrifold },
   { path: '/zones', label: 'Impact zones', icon: GridFour },
   { path: '/resources', label: 'Resources', icon: Package },
+  { path: '/demand', label: 'Demand planning', icon: ChartBar },
 ];
 
 const PAGE_TITLES = {
@@ -26,6 +38,7 @@ const PAGE_TITLES = {
   '/events': 'Disaster Event Feed',
   '/zones': 'Impact Zone Assessment',
   '/resources': 'Resource Inventory',
+  '/demand': 'Resource Demand Planning',
 };
 
 const PAGE_DESCRIPTIONS = {
@@ -33,6 +46,7 @@ const PAGE_DESCRIPTIONS = {
   '/events': 'Review current reports and updates from disaster monitoring feeds.',
   '/zones': 'Assess exposure and estimated population across affected areas.',
   '/resources': 'Review available supplies and depot locations.',
+  '/demand': 'Estimate zone requirements, record field updates, and compare response scenarios.',
 };
 
 const PAGE_SECTIONS = {
@@ -40,6 +54,7 @@ const PAGE_SECTIONS = {
   '/events': 'Incident intelligence',
   '/zones': 'Impact assessment',
   '/resources': 'Relief logistics',
+  '/demand': 'Resource prediction',
 };
 
 const PAGE_SEQUENCES = {
@@ -47,13 +62,22 @@ const PAGE_SEQUENCES = {
   '/events': '03',
   '/zones': '04',
   '/resources': '05',
+  '/demand': '06',
 };
 
 export default function Layout() {
   const location = useLocation();
-  const pageTitle = PAGE_TITLES[location.pathname] || 'DisasterWatch';
-  const isDashboard = location.pathname === '/';
+  const currentPath = PAGE_COMPONENTS[location.pathname] ? location.pathname : '/';
+  const pageTitle = PAGE_TITLES[currentPath] || 'DisasterWatch';
+  const isDashboard = currentPath === '/';
+  const [visitedPages, setVisitedPages] = useState(() => new Set([currentPath]));
   const { theme, toggleTheme } = useTheme();
+
+  useLayoutEffect(() => {
+    setVisitedPages(current => (
+      current.has(currentPath) ? current : new Set([...current, currentPath])
+    ));
+  }, [currentPath]);
 
   return (
     <div className="app-shell">
@@ -97,21 +121,29 @@ export default function Layout() {
       <main className="main-content">
         <div
           className={`page-content${isDashboard ? ' dashboard-content' : ''}`}
-          data-page={location.pathname === '/' ? 'overview' : location.pathname.slice(1)}
+          data-page={currentPath === '/' ? 'overview' : currentPath.slice(1)}
         >
           {!isDashboard && (
             <ScrollReveal as="header" className="page-intro">
-              <p className="page-intro-eyebrow">{PAGE_SECTIONS[location.pathname] || 'Response operations'}</p>
+              <p className="page-intro-eyebrow">{PAGE_SECTIONS[currentPath] || 'Response operations'}</p>
               <h1>{pageTitle}</h1>
-              <p>{PAGE_DESCRIPTIONS[location.pathname] || 'Coordinate information and response across active operations.'}</p>
-              <div className="page-intro-sequence" aria-label={`Sequence ${PAGE_SEQUENCES[location.pathname]}`}>
+              <p>{PAGE_DESCRIPTIONS[currentPath] || 'Coordinate information and response across active operations.'}</p>
+              <div className="page-intro-sequence" aria-label={`Sequence ${PAGE_SEQUENCES[currentPath]}`}>
                 <span>SEQUENCE</span>
-                <strong>{PAGE_SEQUENCES[location.pathname]}</strong>
+                <strong>{PAGE_SEQUENCES[currentPath]}</strong>
                 <i aria-hidden="true" />
               </div>
             </ScrollReveal>
           )}
-          <Outlet />
+          {Object.entries(PAGE_COMPONENTS).map(([path, Page]) => (
+            visitedPages.has(path) && (
+              <div key={path} hidden={path !== currentPath} aria-hidden={path !== currentPath}>
+                <Suspense fallback={<div className="loading-spinner" role="status"><div className="spinner" /></div>}>
+                  <Page />
+                </Suspense>
+              </div>
+            )
+          ))}
         </div>
       </main>
     </div>

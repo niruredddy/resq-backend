@@ -8,10 +8,10 @@ from uuid import UUID
 from geoalchemy2.functions import ST_AsGeoJSON, ST_X, ST_Y
 
 from app.database import get_db, is_db_connected
-from app.mock_store import generate_mock_zones_geojson
+from app.mock_store import MOCK_EVENTS, MOCK_ZONE_VULNERABILITIES, generate_mock_zones_geojson
 from app.models.disaster_event import DisasterEvent
 from app.models.impact_zone import ImpactZone, ZoneSeverity
-from app.schemas import ImpactZoneOut, ZoneGenerationRequest
+from app.schemas import ImpactZoneOut, ZoneGenerationRequest, VulnerabilityProfileUpdate
 from app.services.geospatial.impact_assessment import build_impact_zones
 
 import json
@@ -20,6 +20,51 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/zones", tags=["impact-zones"])
+
+
+@router.put("/{zone_id}/vulnerability")
+def update_zone_vulnerability(
+    zone_id: UUID,
+    request: VulnerabilityProfileUpdate,
+    db: Session = Depends(get_db),
+):
+    """Attach coordinator-supplied demographic shares to one impact zone."""
+    if not is_db_connected():
+        match = next(
+            (
+                (event, feature["properties"])
+                for event in MOCK_EVENTS
+                for feature in generate_mock_zones_geojson(str(event["id"]))["features"]
+                if str(feature["properties"]["id"]) == str(zone_id)
+            ),
+            None,
+        )
+        if match is None:
+            raise HTTPException(status_code=404, detail="Impact zone not found")
+        event, zone = match
+        zone_code = zone["zone_code"]
+        vulnerability = {
+            "elderly_pct": request.elderly_pct,
+            "children_pct": request.children_pct,
+            "medically_dependent_pct": request.medically_dependent_pct,
+            "source": request.source,
+        }
+        MOCK_ZONE_VULNERABILITIES[f"{event['id']}:{zone_code}"] = vulnerability
+        return {"zone_id": zone_id, "vulnerability": vulnerability}
+    zone = db.query(ImpactZone).filter(ImpactZone.id == zone_id).first()
+    if zone is None:
+        raise HTTPException(status_code=404, detail="Impact zone not found")
+
+    properties = dict(zone.properties or {})
+    properties["vulnerability"] = {
+        "elderly_pct": request.elderly_pct,
+        "children_pct": request.children_pct,
+        "medically_dependent_pct": request.medically_dependent_pct,
+        "source": request.source,
+    }
+    zone.properties = properties
+    db.commit()
+    return {"zone_id": zone.id, "vulnerability": properties["vulnerability"]}
 
 
 @router.post("/generate", response_model=list[ImpactZoneOut])
@@ -139,6 +184,8 @@ def get_zones_geojson(
 
 @router.get("/{zone_id}", response_model=ImpactZoneOut)
 def get_zone(zone_id: UUID, db: Session = Depends(get_db)):
+    if not is_db_connected():
+        raise HTTPException(status_code=404, detail="Impact zone not found")
     zone = db.query(ImpactZone).filter(ImpactZone.id == zone_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")

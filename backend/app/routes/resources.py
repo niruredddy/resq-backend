@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from uuid import UUID
 from datetime import datetime
+from uuid import uuid4
 from geoalchemy2.elements import WKTElement
 
 from app.database import get_db, is_db_connected
@@ -49,6 +50,18 @@ def list_depots(
 
 @router.post("/depots", response_model=ResourceDepotOut)
 def create_depot(data: ResourceDepotCreate, db: Session = Depends(get_db)):
+    if not is_db_connected():
+        if any(depot["code"].casefold() == data.code.casefold() for depot in MOCK_DEPOTS):
+            raise HTTPException(status_code=409, detail=f"Depot code '{data.code}' already exists")
+        depot = {
+            "id": str(uuid4()),
+            **data.model_dump(),
+            "status": DepotStatus.ACTIVE.value,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        MOCK_DEPOTS.append(depot)
+        return depot
+
     existing = db.query(ResourceDepot).filter(ResourceDepot.code == data.code).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"Depot code '{data.code}' already exists")
@@ -119,6 +132,23 @@ def list_items(
 
 @router.post("/items", response_model=ResourceItemOut)
 def create_item(data: ResourceItemCreate, db: Session = Depends(get_db)):
+    if not is_db_connected():
+        depot = next(
+            (item for item in MOCK_DEPOTS if str(item["id"]) == str(data.depot_id)),
+            None,
+        )
+        if depot is None:
+            raise HTTPException(status_code=404, detail="Depot not found")
+        item = {
+            "id": str(uuid4()),
+            **data.model_dump(mode="json"),
+            "quantity_deployed": 0,
+            "last_restocked": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        MOCK_ITEMS.append(item)
+        return item
+
     # Verify depot exists
     depot = db.query(ResourceDepot).filter(ResourceDepot.id == data.depot_id).first()
     if not depot:
@@ -146,6 +176,18 @@ def create_item(data: ResourceItemCreate, db: Session = Depends(get_db)):
 
 @router.patch("/items/{item_id}", response_model=ResourceItemOut)
 def update_item(item_id: UUID, data: ResourceItemUpdate, db: Session = Depends(get_db)):
+    if not is_db_connected():
+        item = next((entry for entry in MOCK_ITEMS if str(entry["id"]) == str(item_id)), None)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        updates = data.model_dump(exclude_unset=True)
+        for field, value in updates.items():
+            if value is not None:
+                item[field] = value
+        if data.quantity_available is not None:
+            item["last_restocked"] = datetime.utcnow().isoformat()
+        return item
+
     item = db.query(ResourceItem).filter(ResourceItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")

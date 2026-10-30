@@ -53,12 +53,39 @@ export async function generateZones(eventId, cellSizeKm = 2.0, populationDensity
         event_id: eventId,
         cell_size_km: cellSizeKm,
         population_density: populationDensity,
-    });
+    }, { timeout: 90000 });
     return data;
 }
 
 export async function fetchEventDemand(eventId) {
     const { data } = await api.get(`/demand/events/${eventId}`);
+    return data;
+}
+
+export async function fetchZoneDemand(eventId, planningHorizonDays = 3) {
+    const { data } = await api.get(`/demand/zones/${eventId}`, {
+        params: { planning_horizon_days: planningHorizonDays },
+    });
+    return data;
+}
+
+export async function fetchDemandModelStatus() {
+    const { data } = await api.get('/demand/model-status');
+    return data;
+}
+
+export async function createDemandObservation(observation) {
+    const { data } = await api.post('/demand/observations', observation);
+    return data;
+}
+
+export async function simulateDemandScenario(scenario) {
+    const { data } = await api.post('/demand/scenarios', scenario);
+    return data;
+}
+
+export async function updateZoneVulnerability(zoneId, profile) {
+    const { data } = await api.put(`/zones/${zoneId}/vulnerability`, profile);
     return data;
 }
 
@@ -98,6 +125,11 @@ export async function fetchInventorySummary() {
 
 export async function fetchDashboardStats(daysBack = 30) {
     const { data } = await api.get('/dashboard/stats', { params: { days_back: daysBack } });
+    return data;
+}
+
+export async function fetchHealth() {
+    const { data } = await api.get('/health');
     return data;
 }
 

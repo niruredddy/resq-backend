@@ -6,15 +6,33 @@ from uuid import uuid4
 import numpy as np
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
+from geoalchemy2.elements import WKTElement
+from shapely.geometry import box
 
+from app.mock_store import MOCK_DEPOTS, MOCK_ITEMS
 from app.models.disaster_event import SeverityLevel
-from app.services.geospatial.impact_assessment import build_impact_zones, compute_impact_score, generate_grid_cells
+from app.schemas import ResourceDepotOut, ResourceItemOut
+from app.services.geospatial.impact_assessment import (
+    apply_satellite_extent_to_zones,
+    build_impact_zones,
+    compute_impact_score,
+    generate_grid_cells,
+)
 from app.services.geospatial.osm_service import count_osm_features_by_cell, estimate_building_footprints
 from app.services.geospatial.population_service import PopulationDensityRaster
 from app.services.demand_estimator import estimate_event_demand
 from app.services.ingestion.gdacs_service import parse_gdacs_rss
 from app.services.ingestion.ndma_service import parse_ndma_alerts
 from app.services.ingestion.satellite_service import parse_firms_csv
+
+
+class ResourceInventoryMockTests(unittest.TestCase):
+    def test_mock_inventory_matches_api_response_schemas(self):
+        depots = [ResourceDepotOut.model_validate(depot) for depot in MOCK_DEPOTS]
+        items = [ResourceItemOut.model_validate(item) for item in MOCK_ITEMS]
+
+        self.assertEqual(len(depots), len(MOCK_DEPOTS))
+        self.assertEqual(len(items), len(MOCK_ITEMS))
 
 
 class WeekOneIngestionTests(unittest.TestCase):
@@ -101,6 +119,9 @@ class WeekOneGeospatialTests(unittest.TestCase):
             def filter(self, *_args):
                 return self
 
+            def all(self):
+                return []
+
             def delete(self):
                 return 0
 
@@ -135,6 +156,55 @@ class WeekOneGeospatialTests(unittest.TestCase):
         self.assertEqual(sum(zone.properties["total_buildings"] for zone in zones), 1)
         self.assertTrue(all(zone.properties["osm_source"] == "osm_overpass_live" for zone in zones))
         self.assertTrue(all(zone.properties["population_source"] == "request_override" for zone in zones))
+
+    def test_satellite_extent_immediately_recalibrates_existing_zones(self):
+        event_id = uuid4()
+        inside = SimpleNamespace(
+            cell_geometry=WKTElement(box(0, 0, 1, 1).wkt, srid=4326),
+            population_density=200,
+            cell_size_km=1,
+            infrastructure_score=50,
+            properties={"distance_km": 0, "total_buildings": 100},
+            estimated_population=200,
+            buildings_affected=0,
+        )
+        outside = SimpleNamespace(
+            cell_geometry=WKTElement(box(2, 2, 3, 3).wkt, srid=4326),
+            population_density=200,
+            cell_size_km=1,
+            infrastructure_score=50,
+            properties={"distance_km": 5, "total_buildings": 100},
+            estimated_population=200,
+            buildings_affected=0,
+        )
+
+        class Query:
+            def filter(self, *_args):
+                return self
+
+            def all(self):
+                return [inside, outside]
+
+        class Database:
+            def query(self, *_args):
+                return Query()
+
+        event = SimpleNamespace(
+            id=event_id,
+            magnitude=5,
+            radius_km=10,
+            severity=SeverityLevel.RED,
+        )
+
+        updated_count = apply_satellite_extent_to_zones(Database(), event, box(-0.1, -0.1, 1.1, 1.1))
+
+        self.assertEqual(updated_count, 2)
+        self.assertEqual(inside.properties["satellite_extent_hit"], True)
+        self.assertEqual(inside.estimated_population, 200)
+        self.assertGreater(inside.impact_score, 0)
+        self.assertEqual(outside.properties["satellite_extent_hit"], False)
+        self.assertEqual(outside.estimated_population, 0)
+        self.assertEqual(outside.impact_score, 0)
 
 
 class DemandEstimatorTests(unittest.TestCase):

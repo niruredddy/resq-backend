@@ -4,19 +4,34 @@ Disaster event endpoints — listing, filtering, ingestion triggers.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import json
+import logging
 from uuid import UUID
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_AsGeoJSON
+from shapely.errors import GEOSException
+from shapely.geometry import MultiPolygon, shape
+from shapely.ops import unary_union
 
 from app.database import get_db, is_db_connected
 from app.mock_store import MOCK_EVENTS
 from app.models.disaster_event import DisasterEvent, DisasterType, DataSource, SeverityLevel
-from app.schemas import DisasterEventOut, IngestionRequest, IngestionResult
+from app.models.satellite_assessment import SatelliteAssessment
+from app.schemas import (
+    DisasterEventOut,
+    IngestionRequest,
+    IngestionResult,
+    SatelliteAssessmentRequest,
+)
+from app.services.geospatial.impact_assessment import apply_satellite_extent_to_zones
 from app.services.ingestion.usgs_service import ingest_usgs_data
 from app.services.ingestion.gdacs_service import ingest_gdacs_data
 from app.services.ingestion.ndma_service import ingest_ndma_data
 from app.services.ingestion.satellite_service import ingest_satellite_data
 
 router = APIRouter(prefix="/api/disasters", tags=["disasters"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=list[DisasterEventOut])
@@ -81,6 +96,103 @@ def get_disaster(event_id: UUID, db: Session = Depends(get_db)):
     return _serialize_event(event)
 
 
+@router.post("/{event_id}/satellite-assessments")
+def ingest_satellite_assessment(
+    event_id: UUID,
+    request: SatelliteAssessmentRequest,
+    db: Session = Depends(get_db),
+):
+    """Store an externally derived GeoJSON impact extent for zone scoring."""
+    if not is_db_connected():
+        raise HTTPException(
+            status_code=503,
+            detail="Satellite assessment ingestion requires persistent PostGIS storage.",
+        )
+    event = db.query(DisasterEvent).filter(DisasterEvent.id == event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Disaster event not found")
+
+    document = request.geojson
+    if document.get("type") == "Feature":
+        geometries = [document.get("geometry")]
+    elif document.get("type") == "FeatureCollection":
+        geometries = [
+            feature.get("geometry")
+            for feature in document.get("features", [])
+            if isinstance(feature, dict)
+        ]
+    else:
+        geometries = [document]
+    try:
+        parsed = [shape(geometry) for geometry in geometries if geometry]
+        if not parsed or any(item.geom_type not in {"Polygon", "MultiPolygon"} for item in parsed):
+            raise ValueError("GeoJSON must contain Polygon or MultiPolygon geometries.")
+        extent = unary_union(parsed)
+        if extent.is_empty or not extent.is_valid:
+            raise ValueError("GeoJSON impact extent must be non-empty and valid.")
+    except (GEOSException, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid satellite GeoJSON: {exc}") from exc
+
+    min_lon, min_lat, max_lon, max_lat = extent.bounds
+    if min_lon < -180 or max_lon > 180 or min_lat < -90 or max_lat > 90:
+        raise HTTPException(status_code=422, detail="Satellite GeoJSON coordinates must use WGS84 longitude/latitude.")
+    multi_extent = extent if extent.geom_type == "MultiPolygon" else MultiPolygon([extent])
+
+    assessed_at = request.assessed_at
+    if assessed_at and assessed_at.tzinfo:
+        assessed_at = assessed_at.astimezone(timezone.utc).replace(tzinfo=None)
+    assessment = SatelliteAssessment(
+        event_id=event.id,
+        source=request.assessment_source,
+        assessed_at=assessed_at,
+        extent=WKTElement(multi_extent.wkt, srid=4326),
+    )
+    event.affected_area = WKTElement(multi_extent.wkt, srid=4326)
+    db.add(assessment)
+    updated_zone_count = apply_satellite_extent_to_zones(db, event, extent)
+    db.commit()
+    db.refresh(assessment)
+    return {
+        "id": assessment.id,
+        "event_id": event.id,
+        "source": assessment.source,
+        "assessed_at": assessment.assessed_at,
+        "status": "stored",
+        "updated_zones": updated_zone_count,
+        "message": (
+            f"Extent saved and applied to {updated_zone_count} existing impact zones."
+            if updated_zone_count
+            else "Extent saved. Generate impact zones to calculate zone-level estimates."
+        ),
+    }
+
+
+@router.get("/{event_id}/satellite-assessments")
+def list_satellite_assessments(event_id: UUID, db: Session = Depends(get_db)):
+    if not is_db_connected():
+        raise HTTPException(status_code=503, detail="Satellite assessments require persistent PostGIS storage.")
+    assessments = (
+        db.query(
+            SatelliteAssessment,
+            func.ST_AsGeoJSON(SatelliteAssessment.extent).label("geojson"),
+        )
+        .filter(SatelliteAssessment.event_id == event_id)
+        .order_by(SatelliteAssessment.received_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": assessment.id,
+            "event_id": assessment.event_id,
+            "source": assessment.source,
+            "assessed_at": assessment.assessed_at,
+            "received_at": assessment.received_at,
+            "geojson": json.loads(geojson),
+        }
+        for assessment, geojson in assessments
+    ]
+
+
 @router.post("/ingest", response_model=list[IngestionResult])
 async def trigger_ingestion(
     request: IngestionRequest,
@@ -109,11 +221,12 @@ async def trigger_ingestion(
                 status="success",
             ))
         except Exception as exc:
+            logger.error(_ingestion_error("USGS", exc))
             results.append(IngestionResult(
                 source="usgs",
                 events_ingested=0,
                 status="error",
-                message=str(exc),
+                message=_ingestion_error("USGS", exc),
             ))
 
     if "gdacs" in request.sources:
@@ -125,11 +238,12 @@ async def trigger_ingestion(
                 status="success",
             ))
         except Exception as exc:
+            logger.error(_ingestion_error("GDACS", exc))
             results.append(IngestionResult(
                 source="gdacs",
                 events_ingested=0,
                 status="error",
-                message=str(exc),
+                message=_ingestion_error("GDACS", exc),
             ))
 
     if "ndma" in request.sources:
@@ -141,11 +255,12 @@ async def trigger_ingestion(
                 status="success",
             ))
         except Exception as exc:
+            logger.error(_ingestion_error("NDMA", exc))
             results.append(IngestionResult(
                 source="ndma",
                 events_ingested=0,
                 status="error",
-                message=str(exc),
+                message=_ingestion_error("NDMA", exc),
             ))
 
     if "satellite" in request.sources:
@@ -157,11 +272,12 @@ async def trigger_ingestion(
                 status="success",
             ))
         except Exception as exc:
+            logger.error(_ingestion_error("Satellite", exc))
             results.append(IngestionResult(
                 source="satellite",
                 events_ingested=0,
                 status="error",
-                message=str(exc),
+                message=_ingestion_error("Satellite", exc),
             ))
 
     return results
@@ -226,3 +342,11 @@ def _serialize_event(event: DisasterEvent) -> dict:
         "event_timestamp": event.event_timestamp,
         "ingested_at": event.ingested_at,
     }
+
+
+def _ingestion_error(source: str, error: Exception) -> str:
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code:
+        return f"{source} feed request failed with HTTP {status_code}; check backend logs for details."
+    return f"{source} ingestion failed ({type(error).__name__}); check backend logs for details."

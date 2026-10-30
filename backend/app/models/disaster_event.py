@@ -61,7 +61,7 @@ class DisasterEvent(Base):
 
     severity = Column(SQLEnum(SeverityLevel), default=SeverityLevel.GREEN)
     description = Column(Text, nullable=True)
-    country = Column(String(128), nullable=True, index=True)
+    country = Column(Text, nullable=True, index=True)
     region = Column(String(256), nullable=True)
 
     population_affected = Column(Integer, nullable=True)

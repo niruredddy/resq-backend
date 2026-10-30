@@ -13,11 +13,13 @@ from app.routes.zones import router as zones_router
 from app.routes.resources import router as resources_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.demand import router as demand_router
+from app.routes.operations import router as operations_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s | %(name)-24s | %(levelname)-7s | %(message)s",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,7 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown hooks."""
     logger.info("Starting DisasterWatch API...")
     from app.database import is_db_connected
+    scheduler = None
     if is_db_connected():
         postgis_version = initialize_database()
         logger.info("Database tables ready (%s)", postgis_version)
@@ -35,7 +38,18 @@ async def lifespan(app: FastAPI):
             "Backend is running in development mode with in-memory store. "
             "To enable persistent PostGIS storage, configure DATABASE_URL in backend/.env."
         )
+    if settings.enable_scheduled_ingestion:
+        from app.services.ingestion.scheduler import create_ingestion_scheduler
+
+        scheduler = create_ingestion_scheduler()
+        scheduler.start()
+        logger.info(
+            "Scheduled live feed ingestion every %s minutes",
+            settings.scheduler_interval_minutes,
+        )
     yield
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
     logger.info("Shutting down DisasterWatch API")
 
 
@@ -62,6 +76,7 @@ app.include_router(zones_router)
 app.include_router(resources_router)
 app.include_router(dashboard_router)
 app.include_router(demand_router)
+app.include_router(operations_router)
 
 
 @app.get("/api/health")
