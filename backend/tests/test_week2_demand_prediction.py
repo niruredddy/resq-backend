@@ -263,7 +263,7 @@ class DemandPredictionTests(unittest.TestCase):
         previous_observations = deepcopy(MOCK_DEMAND_OBSERVATIONS)
         try:
             with patch("app.routes.demand.is_db_connected", return_value=False):
-                saved_report = create_demand_observation(request, None)
+                saved_report = create_demand_observation(request, None, actor={"role": "commander"})
                 loaded_event, zones, observations, data_mode = _load_event_data(request.event_id, None)
             result = _build_zone_predictions(
                 loaded_event,
@@ -308,7 +308,7 @@ class DemandPredictionTests(unittest.TestCase):
             ),
             patch("app.routes.demand._load_comparable_stock", return_value={"food_packets": 10000}),
         ):
-            result = simulate_demand_scenario(request, None)
+            result = simulate_demand_scenario(request, None, actor={"role": "commander"})
 
         food = next(item for item in result["zones"][0]["requirements"] if item["resource"] == "food_packets")
         self.assertEqual(result["model_status"], "not_configured")

@@ -1,9 +1,23 @@
 import axios from 'axios';
+import { supabase } from './supabase';
 
 const api = axios.create({
     baseURL: '/api',
     timeout: 15000,
     headers: { 'Content-Type': 'application/json' },
+});
+
+api.interceptors.request.use(async config => {
+    if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session && data.session.access_token) {
+            config.headers.Authorization = `Bearer ${data.session.access_token}`;
+        }
+    } else {
+        const role = localStorage.getItem('resq-demo-role');
+        if (role) config.headers['X-Demo-Role'] = role;
+    }
+    return config;
 });
 
 // ─── Disasters ──────────────────────────────────────────────
@@ -130,6 +144,36 @@ export async function fetchDashboardStats(daysBack = 30) {
 
 export async function fetchHealth() {
     const { data } = await api.get('/health');
+    return data;
+}
+
+export async function optimizeLogistics(plan) {
+    const { data } = await api.post('/logistics/optimize', plan, { timeout: 90000 });
+    return data;
+}
+
+export async function fetchSituationReport(eventId) {
+    const { data } = await api.get(`/logistics/reports/${eventId}`);
+    return data;
+}
+
+export async function fetchOperations(params = {}) {
+    const { data } = await api.get('/operations/', { params });
+    return data;
+}
+
+export async function createOperation(operation) {
+    const { data } = await api.post('/operations/', operation);
+    return data;
+}
+
+export async function updateOperationStatus(operationId, status) {
+    const { data } = await api.patch(`/operations/${operationId}/status`, { status });
+    return data;
+}
+
+export async function updateOperationLocation(operationId, latitude, longitude) {
+    const { data } = await api.patch(`/operations/${operationId}/location`, { latitude, longitude });
     return data;
 }
 

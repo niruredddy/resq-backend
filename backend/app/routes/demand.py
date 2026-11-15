@@ -7,29 +7,36 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.auth import get_actor, require_roles
 from app.database import get_db, is_db_connected
 from app.mock_store import (
     MOCK_DEMAND_OBSERVATIONS,
     MOCK_EVENTS,
+    MOCK_FIELD_OPERATIONS,
     MOCK_ITEMS,
     MOCK_ZONE_VULNERABILITIES,
     generate_mock_zones_geojson,
 )
 from app.models.demand_observation import DemandObservation
 from app.models.disaster_event import DisasterEvent
+from app.models.field_operation import FieldOperation
 from app.models.impact_zone import ImpactZone
 from app.models.resource_inventory import DepotStatus, ResourceDepot, ResourceItem
 from app.schemas import DemandObservationCreate, DemandScenarioRequest
 from app.services.demand_estimator import estimate_event_demand
 from app.services.demand_prediction import load_demand_model, model_status, predict_zone_demand
 
-router = APIRouter(prefix="/api/demand", tags=["resource-demand"])
+router = APIRouter(prefix="/api/demand", tags=["resource-demand"], dependencies=[Depends(get_actor)])
 SCENARIO_DELAY_RATE = 0.25
 RESOURCE_KEYS = ("food_packets", "water_liters", "medical_kits", "shelter_capacity_people")
 
 
 @router.get("/events/{event_id}")
-def event_demand(event_id: UUID, db: Session = Depends(get_db)):
+def event_demand(
+    event_id: UUID,
+    db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander", "logistics")),
+):
     """Retain the original event-level transparent planning baseline."""
     if not is_db_connected():
         event = next((item for item in MOCK_EVENTS if str(item["id"]) == str(event_id)), None)
@@ -57,7 +64,7 @@ def event_demand(event_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/model-status")
-def demand_model_status():
+def demand_model_status(actor=Depends(require_roles("commander", "analyst"))):
     try:
         return model_status(settings.demand_history_csv)
     except (FileNotFoundError, ValueError) as exc:
@@ -69,6 +76,7 @@ def event_zone_demand(
     event_id: UUID,
     planning_horizon_days: int = 3,
     db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander", "logistics", "analyst")),
 ):
     """Recompute estimates using the latest impact zones and field reports."""
     if not 1 <= planning_horizon_days <= 30:
@@ -87,8 +95,32 @@ def event_zone_demand(
 
 
 @router.post("/observations", status_code=201)
-def create_demand_observation(request: DemandObservationCreate, db: Session = Depends(get_db)):
+def create_demand_observation(
+    request: DemandObservationCreate,
+    db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander", "logistics", "field_team")),
+):
     """Record field-confirmed population or demand for dynamic recalculation."""
+    if actor["role"] == "field_team":
+        if not is_db_connected():
+            assigned = any(
+                str(operation.get("event_id")) == str(request.event_id)
+                and operation.get("assigned_to") in {"field_team", actor.get("email")}
+                and operation.get("zone_code") == request.zone_code
+                for operation in MOCK_FIELD_OPERATIONS
+            )
+        else:
+            assigned = bool(
+                request.zone_id
+                and actor.get("email")
+                and db.query(FieldOperation.id).filter(
+                    FieldOperation.assigned_to == actor["email"],
+                    FieldOperation.event_id == request.event_id,
+                    FieldOperation.zone_id == request.zone_id,
+                ).first()
+            )
+        if not assigned:
+            raise HTTPException(status_code=403, detail="Field reports can only be submitted for zones in missions assigned to your account.")
     if not is_db_connected():
         if _mock_event(request.event_id) is None:
             raise HTTPException(status_code=404, detail="Disaster event not found")
@@ -160,7 +192,11 @@ def create_demand_observation(request: DemandObservationCreate, db: Session = De
 
 
 @router.post("/scenarios")
-def simulate_demand_scenario(request: DemandScenarioRequest, db: Session = Depends(get_db)):
+def simulate_demand_scenario(
+    request: DemandScenarioRequest,
+    db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander")),
+):
     """Compare demand and supply under response-time and stock assumptions."""
     event, zones, observations, data_mode = _load_event_data(request.event_id, db)
     model_result = _load_model()

@@ -158,6 +158,46 @@ MOCK_DEPOTS = [
 ]
 
 MOCK_ZONE_VULNERABILITIES = {}
+MOCK_ZONE_PRIORITIES = {}
+
+MOCK_FIELD_OPERATIONS = [
+    {
+        "id": "f1111111-1111-4111-8111-111111111111",
+        "event_id": "9b3a8262-efe8-452e-a5d8-f5048ed3a903",
+        "zone_id": None,
+        "zone_code": "ZONE-R0C0",
+        "operation_code": "OP-SAR-ASSAM-01",
+        "operation_type": "search_rescue",
+        "status": "in_progress",
+        "title": "Brahmaputra north-bank welfare checks",
+        "description": "Check isolated settlements and report urgent medical and shelter needs.",
+        "latitude": 26.35,
+        "longitude": 92.15,
+        "team_lead": "Field Team Alpha",
+        "team_size": 8,
+        "priority": 2,
+        "assigned_to": "field_team",
+        "created_at": datetime.utcnow().isoformat(),
+    },
+    {
+        "id": "f2222222-2222-4222-8222-222222222222",
+        "event_id": "9b3a8262-efe8-452e-a5d8-f5048ed3a903",
+        "zone_id": None,
+        "zone_code": "ZONE-R0C2",
+        "operation_code": "OP-MED-ASSAM-02",
+        "operation_type": "medical_aid",
+        "status": "planned",
+        "title": "Mobile health and water distribution",
+        "description": "Deliver first-aid supplies and potable water to the staging point.",
+        "latitude": 26.20,
+        "longitude": 92.94,
+        "team_lead": "Field Team Bravo",
+        "team_size": 6,
+        "priority": 1,
+        "assigned_to": "field_team_bravo",
+        "created_at": datetime.utcnow().isoformat(),
+    },
+]
 
 MOCK_ITEMS = [
     {

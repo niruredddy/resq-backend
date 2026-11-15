@@ -15,7 +15,7 @@ python -m app.seed
 uvicorn app.main:app --reload --port 8000
 ```
 
-The PostGIS extension and application tables are verified/created at API startup. The seed command adds clearly labeled demo events, zones, and inventory; it does not represent live or historical response data. Open `http://localhost:8000/docs` for the API. Without a database, read-only demo endpoints work in memory, but operations, vulnerability profiles, and persistent reports require PostGIS.
+The PostGIS extension and application tables are verified/created at API startup. The seed command adds clearly labeled demo events, zones, and inventory; it does not represent live or historical response data. Open `http://localhost:8000/docs` for the API. Without a database, supported demo operations and mission updates work in memory and reset on restart; persistent records require PostGIS.
 
 ## Supabase setup
 
@@ -25,6 +25,44 @@ The PostGIS extension and application tables are verified/created at API startup
 4. Keep the URL in a local `.env` file and never commit secrets to Git.
 
 This project supports standard PostgreSQL connection strings, including the Supabase pooler URL format.
+
+## Role-based authentication
+
+- Copy `frontend/.env.example` to `frontend/.env.local` and set `VITE_SUPABASE_URL` plus the Supabase anon/publishable key. These are public client configuration values; never put the Supabase service-role key in the frontend.
+- Set `SUPABASE_URL` in the backend `.env`. For current asymmetric Supabase signing keys, the API validates access tokens against the project's JWKS endpoint. Only set `SUPABASE_JWT_SECRET` for a legacy HS256 project.
+- Assign one of `commander`, `logistics`, `field_team`, `analyst`, or `administrator` to each user's trusted `app_metadata.role`. The backend reads the signed app metadata from the access token; user-editable `user_metadata` and request headers cannot choose a production role. Role assignment must happen through the Supabase dashboard/admin workflow, never from a browser-side service-role key.
+- Without frontend Supabase configuration, the page offers local demo role selection. The API accepts `X-Demo-Role` only when Supabase is also unconfigured. Demo mission/priority changes are process-memory only and reset on restart.
+- Demo-role selection and `X-Demo-Role` are development-only. With `APP_ENV=production` or `DEBUG=false`, the backend rejects requests until Supabase is configured; a production frontend build without Supabase keys shows a configuration gate instead of the demo role selector.
+
+### Data visibility by role
+
+- **Commander:** incident overview, event/impact data, allocation approval, priorities, assigned operations, and full situation reports. Raw depot stock editing is reserved for logistics.
+- **Logistics:** inventory, depot allocation/routes, and mission coordination only; no command overview, analyst reports, or standalone global impact-zone workspace. Cannot set commander priorities.
+- **Analyst:** event/impact and demand analysis plus reports. Inventory quantities, priority overrides, and named/team-location operation details are omitted; aggregate operation status may be shown.
+- **Field team:** only missions assigned to that account, their status/location updates, and field reports for their assigned zone. No global event feed/map, dashboard, depot inventory, allocation, or reports.
+- **Administrator:** all role capabilities.
+
+These are role boundaries inside one shared response workspace. Users with the same authorized role share that workspace's operational records. For isolation between separate agencies/tenants, add an organization identifier to records and enforce it in every query and Supabase/Postgres RLS policy before onboarding multiple organizations.
+
+## Logistics optimization
+
+`POST /api/logistics/optimize` uses OR-Tools CP-SAT with current event demand, active depot stock, per-depot/per-zone payload constraints, zone access penalties, manual blocked routes, and commander priority overrides. It reports demand and coverage by resource because packets, liters, kits, and shelter capacity cannot be summed as interchangeable units. When available, OSRM provides road routes and drive-time estimates; fallback routes are straight-line estimates and must be checked by dispatchers. The public OSRM endpoint is for modest demos, not a production SLA; use a hosted/private routing service for operational traffic. The model currently applies accessibility as a capacity reduction; it does not detect road damage automatically.
+
+Field teams can view assigned operations, change mission status, and submit a browser geolocation as the latest known position. This is not a continuous GPS stream. Situation reports export a JSON snapshot of stored event, demand, inventory gap, zone, and operation records.
+
+## Container deployment
+
+The root `docker-compose.production.yml` builds the frontend/backend against a managed PostGIS database and requires deployment secrets to be injected via the cloud platform. It does not contain a production database password. Example:
+
+```powershell
+$env:DATABASE_URL = "<managed PostGIS connection string>"
+$env:SUPABASE_URL = "https://<project>.supabase.co"
+$env:SUPABASE_ANON_KEY = "<publishable key>"
+$env:CORS_ORIGINS = "https://<public app host>"
+docker compose -f docker-compose.production.yml up --build
+```
+
+This Compose file is a container smoke-deployment, not a high-availability deployment by itself. For HA, run multiple backend replicas behind the cloud load balancer, use managed HA Postgres/PostGIS with backups and connection pooling, store secrets in the cloud secret manager, configure TLS/WAF/rate limits, and monitor `/api/health`. Keep scheduled ingestion to one worker or use a distributed scheduler/queue so replicas do not duplicate jobs. A cloud account and project are needed to deploy and verify those settings.
 
 ## Week 1 data integrations
 

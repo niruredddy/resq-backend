@@ -15,6 +15,7 @@ from shapely.geometry import MultiPolygon, shape
 from shapely.ops import unary_union
 
 from app.database import get_db, is_db_connected
+from app.auth import get_actor, require_roles
 from app.mock_store import MOCK_EVENTS
 from app.models.disaster_event import DisasterEvent, DisasterType, DataSource, SeverityLevel
 from app.models.satellite_assessment import SatelliteAssessment
@@ -30,7 +31,11 @@ from app.services.ingestion.gdacs_service import ingest_gdacs_data
 from app.services.ingestion.ndma_service import ingest_ndma_data
 from app.services.ingestion.satellite_service import ingest_satellite_data
 
-router = APIRouter(prefix="/api/disasters", tags=["disasters"])
+router = APIRouter(
+    prefix="/api/disasters",
+    tags=["disasters"],
+    dependencies=[Depends(require_roles("commander", "logistics", "analyst"))],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -197,6 +202,7 @@ def list_satellite_assessments(event_id: UUID, db: Session = Depends(get_db)):
 async def trigger_ingestion(
     request: IngestionRequest,
     db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander", "logistics")),
 ):
     """Manually trigger data ingestion from selected sources (usgs, gdacs, ndma, satellite)."""
     if not is_db_connected():

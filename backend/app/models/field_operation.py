@@ -43,6 +43,7 @@ class FieldOperation(Base):
         nullable=True,
         index=True,
     )
+    zone_code = Column(String(64), nullable=True, index=True)
 
     operation_code = Column(String(64), unique=True, nullable=False)
     operation_type = Column(SQLEnum(OperationType), nullable=False)
@@ -55,6 +56,7 @@ class FieldOperation(Base):
     area_of_operation = Column(Geometry("POLYGON", srid=4326), nullable=True)
 
     team_lead = Column(String(128), nullable=True)
+    assigned_to = Column(String(320), nullable=True, index=True)
     team_size = Column(Float, nullable=True)
     priority = Column(Float, default=5.0)  # 1 = highest, 10 = lowest
 

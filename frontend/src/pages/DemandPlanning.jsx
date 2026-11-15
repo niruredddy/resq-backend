@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../components/AuthContext';
 import {
   createDemandObservation,
   fetchDemandModelStatus,
@@ -21,6 +22,9 @@ function displayNumber(value) {
 }
 
 export default function DemandPlanning() {
+  const { principal } = useAuth();
+  const canViewSupplyScenario = ['commander', 'logistics', 'administrator'].includes(principal?.role);
+  const canEditZoneProfile = ['commander', 'logistics', 'administrator'].includes(principal?.role);
   const [events, setEvents] = useState([]);
   const [eventId, setEventId] = useState('');
   const [horizon, setHorizon] = useState(3);
@@ -428,7 +432,7 @@ export default function DemandPlanning() {
             </section>
 
             <aside className="demand-side-column">
-              <section className="card demand-panel">
+              {canViewSupplyScenario && <section className="card demand-panel">
                 <div className="card-header"><div><p className="card-eyebrow">Scenario simulator</p><h2>Compare response conditions</h2></div></div>
                 <form className="demand-form" onSubmit={runScenario}>
                   <label>Response time (hours)<input type="number" min="0" max="168" value={responseHours} onChange={event => setResponseHours(event.target.value)} /></label>
@@ -453,9 +457,9 @@ export default function DemandPlanning() {
                     </table>
                   </div>
                 )}
-              </section>
+              </section>}
 
-              <section className="card demand-panel">
+              {canEditZoneProfile && <section className="card demand-panel">
                 <div className="card-header"><div><p className="card-eyebrow">Field feedback</p><h2>{selectedZone?.zone_code || 'Select a zone'}</h2></div></div>
                 <form className="demand-form" onSubmit={submitReport}>
                   <label>Resource type<select value={resource} onChange={event => setResource(event.target.value)}>
@@ -465,9 +469,9 @@ export default function DemandPlanning() {
                   <label>Affected people (optional)<input type="number" min="0" value={affectedPopulation} onChange={event => setAffectedPopulation(event.target.value)} /></label>
                   <button className="btn btn-secondary" disabled={busy || !selectedZone}>Submit field report</button>
                 </form>
-              </section>
+              </section>}
 
-              <section className="card demand-panel">
+              {canEditZoneProfile && <section className="card demand-panel">
                 <div className="card-header"><div><p className="card-eyebrow">Vulnerability weighting</p><h2>Zone population profile</h2></div></div>
                 <form className="demand-form" onSubmit={saveVulnerability}>
                   {[
@@ -487,7 +491,7 @@ export default function DemandPlanning() {
                   <button className="btn btn-secondary" disabled={busy || !selectedZone?.zone_id}>Save zone profile</button>
                   {demand.data_mode === 'demo_mock' && <small>Demo changes are temporary and reset when the backend restarts.</small>}
                 </form>
-              </section>
+              </section>}
             </aside>
           </div>
         </>

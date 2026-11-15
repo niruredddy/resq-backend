@@ -7,13 +7,18 @@ from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 
 from app.database import get_db, is_db_connected
+from app.auth import require_roles
 from app.mock_store import MOCK_EVENTS, MOCK_DEPOTS, MOCK_ITEMS
 from app.models.disaster_event import DisasterEvent, SeverityLevel
 from app.models.impact_zone import ImpactZone, ZoneSeverity
 from app.models.resource_inventory import ResourceDepot, ResourceItem, DepotStatus
 from app.schemas import DashboardStats
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/api/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(require_roles("commander"))],
+)
 
 
 @router.get("/stats", response_model=DashboardStats)

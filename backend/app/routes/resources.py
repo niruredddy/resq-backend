@@ -10,6 +10,7 @@ from uuid import uuid4
 from geoalchemy2.elements import WKTElement
 
 from app.database import get_db, is_db_connected
+from app.auth import require_roles
 from app.mock_store import MOCK_DEPOTS, MOCK_ITEMS
 from app.models.resource_inventory import (
     ResourceDepot, ResourceItem, ResourceCategory, DepotStatus
@@ -20,7 +21,11 @@ from app.schemas import (
     InventorySummary,
 )
 
-router = APIRouter(prefix="/api/resources", tags=["resources"])
+router = APIRouter(
+    prefix="/api/resources",
+    tags=["resources"],
+    dependencies=[Depends(require_roles("logistics"))],
+)
 
 
 # ─── Depots ─────────────────────────────────────────────────────
@@ -49,7 +54,7 @@ def list_depots(
 
 
 @router.post("/depots", response_model=ResourceDepotOut)
-def create_depot(data: ResourceDepotCreate, db: Session = Depends(get_db)):
+def create_depot(data: ResourceDepotCreate, db: Session = Depends(get_db), actor=Depends(require_roles("logistics"))):
     if not is_db_connected():
         if any(depot["code"].casefold() == data.code.casefold() for depot in MOCK_DEPOTS):
             raise HTTPException(status_code=409, detail=f"Depot code '{data.code}' already exists")
@@ -131,7 +136,7 @@ def list_items(
 
 
 @router.post("/items", response_model=ResourceItemOut)
-def create_item(data: ResourceItemCreate, db: Session = Depends(get_db)):
+def create_item(data: ResourceItemCreate, db: Session = Depends(get_db), actor=Depends(require_roles("logistics"))):
     if not is_db_connected():
         depot = next(
             (item for item in MOCK_DEPOTS if str(item["id"]) == str(data.depot_id)),
@@ -175,7 +180,7 @@ def create_item(data: ResourceItemCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/items/{item_id}", response_model=ResourceItemOut)
-def update_item(item_id: UUID, data: ResourceItemUpdate, db: Session = Depends(get_db)):
+def update_item(item_id: UUID, data: ResourceItemUpdate, db: Session = Depends(get_db), actor=Depends(require_roles("logistics"))):
     if not is_db_connected():
         item = next((entry for entry in MOCK_ITEMS if str(entry["id"]) == str(item_id)), None)
         if item is None:

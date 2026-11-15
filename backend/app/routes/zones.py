@@ -8,6 +8,7 @@ from uuid import UUID
 from geoalchemy2.functions import ST_AsGeoJSON, ST_X, ST_Y
 
 from app.database import get_db, is_db_connected
+from app.auth import get_actor, require_roles
 from app.mock_store import MOCK_EVENTS, MOCK_ZONE_VULNERABILITIES, generate_mock_zones_geojson
 from app.models.disaster_event import DisasterEvent
 from app.models.impact_zone import ImpactZone, ZoneSeverity
@@ -19,7 +20,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/zones", tags=["impact-zones"])
+router = APIRouter(
+    prefix="/api/zones",
+    tags=["impact-zones"],
+    dependencies=[Depends(require_roles("commander", "analyst"))],
+)
 
 
 @router.put("/{zone_id}/vulnerability")
@@ -27,6 +32,7 @@ def update_zone_vulnerability(
     zone_id: UUID,
     request: VulnerabilityProfileUpdate,
     db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander")),
 ):
     """Attach coordinator-supplied demographic shares to one impact zone."""
     if not is_db_connected():
@@ -71,6 +77,7 @@ def update_zone_vulnerability(
 def generate_zones(
     request: ZoneGenerationRequest,
     db: Session = Depends(get_db),
+    actor=Depends(require_roles("commander")),
 ):
     """Generate impact zone grid for a given disaster event."""
     if not is_db_connected():
@@ -149,7 +156,7 @@ def get_zones_geojson(
     db: Session = Depends(get_db),
 ):
     """Export zones as a GeoJSON FeatureCollection for direct map rendering."""
-    if not is_db_connected():
+    if db is None or not is_db_connected():
         return generate_mock_zones_geojson(str(event_id))
     zones = db.query(
         ImpactZone,

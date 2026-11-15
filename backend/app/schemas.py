@@ -145,10 +145,12 @@ class FieldOperationCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     event_id: Optional[UUID] = None
     zone_id: Optional[UUID] = None
+    zone_code: Optional[str] = Field(default=None, max_length=64)
     description: Optional[str] = None
     latitude: Optional[float] = Field(default=None, ge=-90, le=90)
     longitude: Optional[float] = Field(default=None, ge=-180, le=180)
     team_lead: Optional[str] = Field(default=None, max_length=128)
+    assigned_to: Optional[str] = Field(default=None, max_length=320)
     team_size: Optional[float] = Field(default=None, ge=0)
     priority: float = Field(default=5, ge=1, le=10)
     estimated_duration_hrs: Optional[float] = Field(default=None, ge=0)
@@ -162,6 +164,24 @@ class FieldOperationCreate(BaseModel):
 
 class FieldOperationStatusUpdate(BaseModel):
     status: Literal["planned", "in_progress", "completed", "suspended", "cancelled"]
+
+
+class FieldOperationLocationUpdate(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class BlockedRoute(BaseModel):
+    depot_id: str = Field(min_length=1, max_length=64)
+    zone_code: str = Field(min_length=1, max_length=64)
+
+
+class LogisticsOptimizationRequest(BaseModel):
+    event_id: UUID
+    planning_horizon_days: int = Field(default=3, ge=1, le=30)
+    transport_capacity_kg: int = Field(default=20000, gt=0, le=1000000)
+    priority_overrides: dict[str, int] = Field(default_factory=dict)
+    blocked_routes: list[BlockedRoute] = Field(default_factory=list)
 
 
 # ─── Resource Inventory ─────────────────────────────────────────

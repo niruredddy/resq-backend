@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     nasa_firms_days: int = 1
     population_raster_path: Optional[str] = None
     demand_history_csv: Optional[str] = str(DEFAULT_DEMAND_HISTORY_CSV)
+    supabase_url: Optional[str] = None
+    supabase_jwt_secret: Optional[str] = None
+    osrm_base_url: str = "https://router.project-osrm.org"
 
     app_env: str = "development"
     debug: bool = True

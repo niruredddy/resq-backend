@@ -55,6 +55,12 @@ def initialize_database() -> str:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         connection.execute(
+            text("ALTER TABLE field_operations ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(320)")
+        )
+        connection.execute(
+            text("ALTER TABLE field_operations ADD COLUMN IF NOT EXISTS zone_code VARCHAR(64)")
+        )
+        connection.execute(
             text("ALTER TABLE disaster_events ALTER COLUMN country TYPE TEXT")
         )
     return str(postgis_version)

@@ -14,6 +14,7 @@ from app.routes.resources import router as resources_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.demand import router as demand_router
 from app.routes.operations import router as operations_router
+from app.routes.logistics import router as logistics_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -77,6 +78,7 @@ app.include_router(resources_router)
 app.include_router(dashboard_router)
 app.include_router(demand_router)
 app.include_router(operations_router)
+app.include_router(logistics_router)
 
 
 @app.get("/api/health")

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useState } from 'react';
+import { lazy, Suspense } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   HouseLine,
@@ -7,12 +7,18 @@ import {
   GridFour,
   Package,
   ChartBar,
+  Truck,
+  ClipboardText,
+  FileText,
   Lightning,
   Moon,
   Sun,
+  SignOut,
 } from '@phosphor-icons/react';
 import { useTheme } from './ThemeContext';
 import ScrollReveal from './ScrollReveal';
+import { useAuth } from './AuthContext';
+import { Navigate } from 'react-router-dom';
 
 const PAGE_COMPONENTS = {
   '/': lazy(() => import('../pages/Dashboard')),
@@ -21,15 +27,21 @@ const PAGE_COMPONENTS = {
   '/zones': lazy(() => import('../pages/ImpactZones')),
   '/resources': lazy(() => import('../pages/ResourceInventory')),
   '/demand': lazy(() => import('../pages/DemandPlanning')),
+  '/logistics': lazy(() => import('../pages/LogisticsPlanning')),
+  '/missions': lazy(() => import('../pages/FieldMissions')),
+  '/reports': lazy(() => import('../pages/SituationReports')),
 };
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Overview', icon: HouseLine },
-  { path: '/events', label: 'News', icon: ListBullets },
-  { path: '/map', label: 'Map', icon: MapTrifold },
-  { path: '/zones', label: 'Impact zones', icon: GridFour },
-  { path: '/resources', label: 'Resources', icon: Package },
-  { path: '/demand', label: 'Demand planning', icon: ChartBar },
+  { path: '/', label: 'Overview', icon: HouseLine, roles: ['commander'] },
+  { path: '/events', label: 'News', icon: ListBullets, roles: ['commander', 'analyst'] },
+  { path: '/map', label: 'Map', icon: MapTrifold, roles: ['commander', 'analyst'] },
+  { path: '/zones', label: 'Impact zones', icon: GridFour, roles: ['commander', 'analyst'] },
+  { path: '/resources', label: 'Resources', icon: Package, roles: ['logistics'] },
+  { path: '/demand', label: 'Demand planning', icon: ChartBar, roles: ['commander', 'analyst'] },
+  { path: '/logistics', label: 'Logistics plan', icon: Truck, roles: ['commander', 'logistics'] },
+  { path: '/missions', label: 'Field missions', icon: ClipboardText, roles: ['commander', 'logistics', 'field_team'] },
+  { path: '/reports', label: 'Situation reports', icon: FileText, roles: ['commander', 'analyst'] },
 ];
 
 const PAGE_TITLES = {
@@ -39,6 +51,9 @@ const PAGE_TITLES = {
   '/zones': 'Impact Zone Assessment',
   '/resources': 'Resource Inventory',
   '/demand': 'Resource Demand Planning',
+  '/logistics': 'Logistics Planning',
+  '/missions': 'Field Mission Board',
+  '/reports': 'Situation Reports',
 };
 
 const PAGE_DESCRIPTIONS = {
@@ -47,6 +62,9 @@ const PAGE_DESCRIPTIONS = {
   '/zones': 'Assess exposure and estimated population across affected areas.',
   '/resources': 'Review available supplies and depot locations.',
   '/demand': 'Estimate zone requirements, record field updates, and compare response scenarios.',
+  '/logistics': 'Optimize depot-to-zone allocations, routes, vehicle payload, and commander priorities.',
+  '/missions': 'Review assigned response tasks, team locations, and mission progress.',
+  '/reports': 'Compile event conditions, impact, demand, resource coverage, and field operations.',
 };
 
 const PAGE_SECTIONS = {
@@ -55,6 +73,9 @@ const PAGE_SECTIONS = {
   '/zones': 'Impact assessment',
   '/resources': 'Relief logistics',
   '/demand': 'Resource prediction',
+  '/logistics': 'Relief logistics',
+  '/missions': 'Field operations',
+  '/reports': 'Post-event analytics',
 };
 
 const PAGE_SEQUENCES = {
@@ -63,6 +84,17 @@ const PAGE_SEQUENCES = {
   '/zones': '04',
   '/resources': '05',
   '/demand': '06',
+  '/logistics': '07',
+  '/missions': '08',
+  '/reports': '09',
+};
+
+const ROLE_HOME = {
+  commander: '/',
+  logistics: '/logistics',
+  analyst: '/reports',
+  field_team: '/missions',
+  administrator: '/',
 };
 
 export default function Layout() {
@@ -70,14 +102,18 @@ export default function Layout() {
   const currentPath = PAGE_COMPONENTS[location.pathname] ? location.pathname : '/';
   const pageTitle = PAGE_TITLES[currentPath] || 'DisasterWatch';
   const isDashboard = currentPath === '/';
-  const [visitedPages, setVisitedPages] = useState(() => new Set([currentPath]));
   const { theme, toggleTheme } = useTheme();
+  const { principal, signOut } = useAuth();
+  const visibleNavItems = principal?.role === 'administrator'
+    ? NAV_ITEMS
+    : NAV_ITEMS.filter(item => item.roles.includes(principal?.role));
 
-  useLayoutEffect(() => {
-    setVisitedPages(current => (
-      current.has(currentPath) ? current : new Set([...current, currentPath])
-    ));
-  }, [currentPath]);
+  if (!PAGE_COMPONENTS[currentPath] || (
+    principal?.role !== 'administrator'
+    && !NAV_ITEMS.some(item => item.path === currentPath && item.roles.includes(principal?.role))
+  )) {
+    return <Navigate to={ROLE_HOME[principal?.role] || '/'} replace />;
+  }
 
   return (
     <div className="app-shell">
@@ -93,7 +129,7 @@ export default function Layout() {
         </NavLink>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+          {visibleNavItems.map(({ path, label, icon: Icon }) => (
             <NavLink
               key={path}
               to={path}
@@ -104,6 +140,14 @@ export default function Layout() {
               {label}
             </NavLink>
           ))}
+          <div className="nav-principal" title={principal?.email || 'Local role preview'}>
+            <span className="nav-principal-dot" />
+            <span>{principal?.role?.replaceAll('_', ' ')}</span>
+            {principal?.authMode === 'demo' && <small>DEMO</small>}
+          </div>
+          <button type="button" className="theme-toggle" onClick={signOut} aria-label="Sign out" title="Sign out">
+            <SignOut weight="regular" /><span>Sign out</span>
+          </button>
           <button
             type="button"
             className="theme-toggle"
@@ -135,15 +179,12 @@ export default function Layout() {
               </div>
             </ScrollReveal>
           )}
-          {Object.entries(PAGE_COMPONENTS).map(([path, Page]) => (
-            visitedPages.has(path) && (
-              <div key={path} hidden={path !== currentPath} aria-hidden={path !== currentPath}>
-                <Suspense fallback={<div className="loading-spinner" role="status"><div className="spinner" /></div>}>
-                  <Page />
-                </Suspense>
-              </div>
-            )
-          ))}
+          <Suspense fallback={<div className="loading-spinner" role="status"><div className="spinner" /></div>}>
+            {(() => {
+              const Page = PAGE_COMPONENTS[currentPath];
+              return <Page key={`${principal.id}:${currentPath}`} />;
+            })()}
+          </Suspense>
         </div>
       </main>
     </div>
