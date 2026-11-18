@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ResQ Emergency Response</string>
+    <string name="title_activity_main">ResQ Emergency Response</string>
+    <string name="package_name">com.resq.disasterresponse</string>
+    <string name="custom_url_scheme">com.resq.disasterresponse</string>
+</resources>

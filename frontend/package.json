@@ -1,19 +1,46 @@
 {
-  "name": "frontend",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "name": "resq-disaster-response",
+  "version": "1.0.0",
+  "description": "AI-Powered Emergency Response Intelligence Platform",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:start": "electron electron/main.cjs",
+    "package": "vite build && electron-builder --win dir",
+    "dist": "vite build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.resq.disasterresponse",
+    "productName": "ResQ Emergency Response",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    }
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/supabase-js": "^2.119.0",
     "axios": "^1.20.0",

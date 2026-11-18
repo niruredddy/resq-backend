@@ -12,6 +12,7 @@ const ROLE_OPTIONS = [
 export default function AuthGate() {
   const { principal, signIn, signUp, signInWithOAuth, continueAsDemo, signOut } = useAuth();
   const [selectedRole, setSelectedRole] = useState('commander');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [registering, setRegistering] = useState(false);
@@ -39,8 +40,9 @@ export default function AuthGate() {
     setMessage('');
     try {
       if (registering) {
-        await signUp(email, password);
-        setMessage('Account created. Confirm your email, then sign in. A ResQ role must be assigned by an administrator.');
+        await signUp(email, password, selectedRole, fullName);
+        setMessage('Account created! Sign in with your credentials to enter the workspace.');
+        setRegistering(false);
       } else {
         await signIn(email, password);
       }
@@ -89,8 +91,29 @@ export default function AuthGate() {
               <span style={{ padding: '0 0.5rem' }}>or email</span>
               <div style={{ flex: 1, height: '1px', background: 'currentColor', opacity: 0.2 }} />
             </div>
+            {registering && (
+              <label>Full name
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={fullName}
+                  onChange={event => setFullName(event.target.value)}
+                  placeholder="e.g. Commander Sarah Connor"
+                  required
+                />
+              </label>
+            )}
             <label>Email address<input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
             <label>Password<input type="password" autoComplete={registering ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
+            {registering && (
+              <label>Desired response role
+                <select value={selectedRole} onChange={event => setSelectedRole(event.target.value)} style={{ width: '100%', padding: '0.6rem', marginTop: '0.35rem', borderRadius: '4px', border: '1px solid var(--border-subtle, #333)', background: 'var(--surface-raised, #222)', color: 'inherit' }}>
+                  {ROLE_OPTIONS.map(opt => (
+                    <option key={opt.role} value={opt.role}>{opt.label} — {opt.detail}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {error && <p className="demand-message is-error" role="alert">{error}</p>}
             {message && <p className="demand-message is-success" role="status">{message}</p>}
             <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Please wait…' : registering ? 'Create account' : 'Sign in'}</button>

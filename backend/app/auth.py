@@ -19,6 +19,11 @@ def get_actor(
     authorization: str | None = Header(default=None),
     x_demo_role: str | None = Header(default=None),
 ) -> dict:
+    if (settings.app_env.lower() == "development" or settings.debug) and x_demo_role:
+        role = (x_demo_role or "").strip().lower()
+        if role in VALID_ROLES:
+            return {"id": f"demo:{role}", "email": None, "role": role, "auth_mode": "demo"}
+
     if not settings.supabase_url and not settings.supabase_jwt_secret:
         if settings.app_env.lower() != "development" or not settings.debug:
             raise HTTPException(status_code=503, detail="Supabase authentication must be configured before production access is enabled.")

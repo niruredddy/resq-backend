@@ -139,7 +139,7 @@ def get_situation_report(
             raise HTTPException(status_code=404, detail="Disaster event not found")
         event_data = {
             "id": str(event.id), "title": event.title,
-            "disaster_type": _read(event.disaster_type), "severity": _read(event.severity),
+            "disaster_type": _read(event, "disaster_type"), "severity": _read(event, "severity"),
             "country": event.country, "region": event.region,
             "population_affected": event.population_affected,
             "event_timestamp": event.event_timestamp.isoformat() if event.event_timestamp else None,

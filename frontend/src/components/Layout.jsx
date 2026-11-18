@@ -140,10 +140,21 @@ export default function Layout() {
               {label}
             </NavLink>
           ))}
-          <div className="nav-principal" title={principal?.email || 'Local role preview'}>
-            <span className="nav-principal-dot" />
-            <span>{principal?.role?.replaceAll('_', ' ')}</span>
-            {principal?.authMode === 'demo' && <small>DEMO</small>}
+          <div className="nav-principal" title={principal?.email || 'Local role preview'} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem' }}>
+            {principal?.avatarUrl ? (
+              <img src={principal.avatarUrl} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              <span className="nav-principal-dot" />
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+              <strong style={{ fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {principal?.name || principal?.email || 'Agent'}
+              </strong>
+              <span style={{ fontSize: '0.75rem', opacity: 0.7, textTransform: 'capitalize' }}>
+                {principal?.role?.replaceAll('_', ' ')}
+              </span>
+            </div>
+            {principal?.authMode === 'demo' && <small style={{ marginLeft: 'auto' }}>DEMO</small>}
           </div>
           <button type="button" className="theme-toggle" onClick={signOut} aria-label="Sign out" title="Sign out">
             <SignOut weight="regular" /><span>Sign out</span>

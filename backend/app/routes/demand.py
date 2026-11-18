@@ -270,7 +270,7 @@ def _mock_event(event_id: UUID):
 
 
 def _load_event_data(event_id: UUID, db: Session):
-    if not is_db_connected():
+    if db is None or not is_db_connected():
         event = _mock_event(event_id)
         if event is None:
             raise HTTPException(status_code=404, detail="Disaster event not found")

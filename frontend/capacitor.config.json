@@ -1,0 +1,9 @@
+{
+  "appId": "com.resq.disasterresponse",
+  "appName": "ResQ Emergency Response",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}

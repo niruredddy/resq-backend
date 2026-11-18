@@ -9,7 +9,17 @@ function fromSession(session) {
   const user = session?.user;
   const role = user?.app_metadata?.role;
   if (!user) return null;
-  return { id: user.id, email: user.email, role: ROLES.has(role) ? role : null, authMode: 'supabase', session };
+  const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0];
+  const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: fullName,
+    avatarUrl,
+    role: ROLES.has(role) ? role : null,
+    authMode: 'supabase',
+    session,
+  };
 }
 
 export function AuthProvider({ children }) {
@@ -50,9 +60,27 @@ export function AuthProvider({ children }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
     },
-    async signUp(email, password) {
-      const { error } = await supabase.auth.signUp({ email, password });
+    async signUp(email, password, role = 'commander', fullName = '') {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            role,
+            full_name: fullName.trim() || email.split('@')[0],
+          },
+        },
+      });
       if (error) throw error;
+    },
+    async updateProfile(updates) {
+      if (!supabase) return;
+      const { error } = await supabase.auth.updateUser({
+        data: updates,
+      });
+      if (error) throw error;
+      const { data } = await supabase.auth.getSession();
+      setPrincipal(fromSession(data.session));
     },
     async signInWithOAuth(provider) {
       const { error } = await supabase.auth.signInWithOAuth({
