@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: resq-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        value: postgresql://postgres.jlvkenuwssqczexzlrsm:2ie90AzUVz9vb99M@aws-0-ap-south-1.pooler.supabase.com:5432/postgres
+      - key: SUPABASE_URL
+        value: https://jlvkenuwssqczexzlrsm.supabase.co
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: ENABLE_SCHEDULED_INGESTION
+        value: "false"
+      - key: NASA_FIRMS_MAP_KEY
+        value: "0130d6e57a41be225b22784bb13cfc8f"
